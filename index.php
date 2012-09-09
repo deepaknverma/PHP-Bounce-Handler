@@ -1,208 +1,102 @@
 <?php
-//header("Location: /timekeeper/");
-//exit;
-########################################################
-# Script Info
-# ===========
-# File: DirectoryListing.php
-# Author: Ash Young (ash@evoluted.net
-# Created: 20/12/03
-# Modified: 27/09/04
-# Website: http://evoluted.net/directorylisting.php
-# Requirements: PHP
-#
-# Description
-# ===========
-# Displays all files contained within a directory in
-# a well formed table, with category-image tags
-#
-# If you have any functions that you like to see
-# implemented in this script then please just send
-# an email to ash@evoluted.net
-#
-# Useage
-# ======
-#
-# To change the colours display when using the script
-# scroll down to set up section
-#
-# To use the script just upload to your server with
-# the images and point your browser to the scripts
-# filename
-#
-# SETUP
-# =====
-#
-# Change the following variables to display what colours
-# the script outputs
-########################################################
 
-DEFINE("IMAGEROOT", "/images/");  #CHANGE /images/ TO THE PATH OF THE ASSOCIATED IMAGES
+// define variables
+$mail_box = '{mail.blackswandev.net/novalidate-cert}'; //imap example
+$mail_user = 'mailuser@blackswandev.net'; //mail username
+$mail_pass = 'admin123'; //mail password
+$delete = '1'; //deletes emails with at least this number of failures
 
-$textcolor = "#FFFFFF";           #TEXT COLOUR
-$bgcolor = "#535353";             #PAGE BACKGROUND COLOUR
+// include database connection settings
+include('conn.inc.php');
 
-$normalcolor = "#0066FF";         #TABLE ROW BACKGROUND COLOUR
-$highlightcolor = "#006699";      #TABLE ROW BACKGROUND COLOUR WHEN HIGHLIGHTED
-$headercolor = "#003366";         #TABLE HEADER BACKGROUND COLOUR
-$bordercolor = "#202750";         #TABLE BORDER COLOUR
+// query table emailid
+$query = mysql_query("SELECT * FROM emailid WHERE statuscode = '';");
+
+while ($DBdata = mysql_fetch_assoc($query)) 
+{
+	$email .= $DBdata['email']. ", ";
+}
+
+$email_list = explode(',', $email);
+
+// count how many emails there are.
+$total_emails = count($email_list);
+
+// go through the list and trim off the newline character.
+for ($counter=0; $counter<$total_emails; $counter++)
+{
+$email_list[$counter] = trim($email_list[$counter]);
+}
+
+$to = $email_list;
+$mail_subject = 'testing bounce email';
+$mail_msg = 'Mail succedded';
+$headers = 'From: mailuser@blackswandev.net' . "\r\n" . 'Reply-To: mailuser@blackswandev.net' . "\r\n" . 'Return-Path: mailuser@blackswandev.net' . "\r\n" . 'X-Mailer: PHP/' . phpversion();
+
+foreach ($to as $mail_to) 
+{
+	// send mail via php smtp function
+	$send_mail = mail($mail_to,$mail_subject,$mail_msg, $headers, "-f $mail_user");
+	echo 'mailed to: '. $mail_to.'<br />';
+}
+  
+// connect to mailbox using imap
+$conn = imap_open ($mail_box, $mail_user, $mail_pass) or die(imap_last_error());
+//read messages
+$num_msgs = imap_num_msg($conn);
+
+//start bounce class
+require_once('bounce_driver.class.php');
+$bouncehandler = new Bouncehandler();
+
+// get the failures
+$email_addresses = array();
+$delete_addresses = array();
+
+for ($n=1;$n<=$num_msgs;$n++) 
+{
+	$bounce = imap_fetchheader($conn, $n).imap_body($conn, $n); //entire message
+	$multiArray = $bouncehandler->get_the_facts($bounce);
+	$statusmsg = $bouncehandler->fetch_status_messages($bounce);
+	$statuscode = $bouncehandler->format_status_code($bounce);
+  
+	echo '<br />multiArray: ';
+	var_dump ($multiArray);
+	echo '<br />statusmsg: ';
+	var_dump ($statusmsg);
+	echo '<br /> statuscode: ';
+		var_dump ($statuscode);
+	echo '<br />------------------------------------------------------------------------------------------';
+	if (!empty($multiArray[0]['action']) && !empty($multiArray[0]['status']) && !empty($multiArray[0]['recipient']) ) 
+	{
+		if ($multiArray[0]['action']=='failed') 
+		{
+			$email_addresses[$multiArray[0]['recipient']]++; //increment number of failures
+			$delete_addresses[$multiArray[0]['recipient']][] = $n; //add message to delete array
+		} //if delivery failed
+	} //if passed parsing as bounce
+} //for loop
+
+// process the failures
+foreach ($email_addresses as $key => $value)	//trim($key) is email address, $value is number of failures 
+{ 
+    if ($value>=$delete) 
+	{
+    /*
+    do whatever you need to do here, e.g. unsubscribe email address
+    */
+		// mark for deletion
+		foreach ($delete_addresses[$key] as $delnum)
+		{
+			echo 'bounce email found: '. $value.'<br />';
+		}
+    } //if failed more than $delete times
+} //foreach
+
+// delete messages
+imap_expunge($conn);
+
+// close
+imap_close($conn);
 
 ?>
-<html>
-<head>
-<title>Directory Listings of <? echo $_SERVER["REQUEST_URI"]; ?> </title>
-<style type='text/css'>
-<!--
-body {     color: <? echo $textcolor; ?>; font: tahoma, small verdana,arial,helvetica,sans-serif; background-color: <? echo $bgcolor; ?>; }
-table { font-family: tahoma, Verdana, Geneva, sans-serif; border: 1px; border-style: solid; border-color: <? echo $bordercolor; ?>; }
-.row { background-color: <? echo $normalcolor; ?>; border: 0px;}
-a:link { color: <? echo $textcolor; ?>;  text-decoration: none; }
-a:visited { color: <? echo $textcolor; ?>;  text-decoration: none; }
-a:hover, a:active { color: <? echo $textcolor; ?>;  text-decoration: none; }
-img {border: 0;}
-#bottomborder {border: <? echo $bordercolor;?>;border-style: solid;border-top-width: 0px;border-right-width: 0px;border-bottom-width: 1px;border-left-width: 0px}
-.copy { text-align: center; color: <? echo $textcolor; ?>; font-family: tahoma, Verdana, Geneva, sans-serif;   text-decoration: underline; }
-//-->
-</style>
-</head>
-<body>
-<?php
-clearstatcache();
-if ($handle = opendir('.')) {
-  while (false !== ($file = readdir($handle))) {
-    if ($file != "." && $file != ".." && $file != substr($PHP_SELF, -(strlen($PHP_SELF) - strrpos($PHP_SELF, "/") - 1))) {
-
-	  if (filetype($file) == "dir") {
-		  //SET THE KEY ENABLING US TO SORT
-		  $n++;
-		  if($_REQUEST['sort']=="date") {
-			$key = filemtime($file) . ".$n";
-		  }
-		  else {
-			$key = $n;
-		  }
-          $dirs[$key] = $file . "/";
-      }
-      else {
-		  //SET THE KEY ENABLING US TO SORT
-		  $n++;
-		  if($_REQUEST['sort']=="date") {
-			$key = filemtime($file) . ".$n";
-		  }
-		  elseif($_REQUEST['sort']=="size") {
-			$key = filesize($file) . ".$n";
-		  }
-		  else {
-			$key = $n;
-		  }
-          $files[$key] = $file;
-      }
-    }
-  }
-closedir($handle);
-}
-
-#USE THE CORRECT ALGORITHM AND SORT OUR ARRAY
-if($_REQUEST['sort']=="date") {
-	@ksort($dirs, SORT_NUMERIC);
-	@ksort($files, SORT_NUMERIC);
-}
-elseif($_REQUEST['sort']=="size") {
-	@natcasesort($dirs);
-	@ksort($files, SORT_NUMERIC);
-}
-else {
-	@natcasesort($dirs);
-	@natcasesort($files);
-}
-
-#ORDER ACCORDING TO ASCENDING OR DESCENDING AS REQUESTED
-if($_REQUEST['order']=="desc" && $_REQUEST['sort']!="size") {$dirs = array_reverse($dirs);}
-if($_REQUEST['order']=="desc") {$files = array_reverse($files);}
-$dirs = @array_values($dirs); $files = @array_values($files);
-
-echo "<table width=\"650\" border=\"0\" cellspacing=\"0\" align=\"center\"><tr bgcolor=\"$headercolor\"><td colspan=\"2\" id=\"bottomborder\">";
-if($_REQUEST['sort']!="name") {
-  echo "<a href=\"".$_SERVER['PHP_SELF']."?sort=name&order=asc\">";
-}
-else {
-  if($_REQUEST['order']=="desc") {#
-    echo "<a href=\"".$_SERVER['PHP_SELF']."?sort=name&order=asc\">";
-  }
-  else {
-    echo "<a href=\"".$_SERVER['PHP_SELF']."?sort=name&order=desc\">";
-  }
-}
-echo "File</td><td id=\"bottomborder\" width=\"50\"></a>";
-if($_REQUEST['sort']!="size") {
-  echo "<a href=\"".$_SERVER['PHP_SELF']."?sort=size&order=asc\">";
-}
-else {
-  if($_REQUEST['order']=="desc") {#
-    echo "<a href=\"".$_SERVER['PHP_SELF']."?sort=size&order=asc\">";
-  }
-  else {
-    echo "<a href=\"".$_SERVER['PHP_SELF']."?sort=size&order=desc\">";
-  }
-}
-echo "Size</td><td id=\"bottomborder\" width=\"120\" nowrap></a>";
-if($_REQUEST['sort']!="date") {
-  echo "<a href=\"".$_SERVER['PHP_SELF']."?sort=date&order=asc\">";
-}
-else {
-  if($_REQUEST['order']=="desc") {#
-    echo "<a href=\"".$_SERVER['PHP_SELF']."?sort=date&order=asc\">";
-  }
-  else {
-    echo "<a href=\"".$_SERVER['PHP_SELF']."?sort=date&order=desc\">";
-  }
-}
-echo "Date Modified</a></td></tr>";
-
-$arsize = sizeof($dirs);
-for($i=0;$i<$arsize;$i++) {
-  echo "\t<tr class=\"row\" onMouseOver=\"this.style.backgroundColor='$highlightcolor'; this.style.cursor='hand';\" onMouseOut=\"this.style.backgroundColor='$normalcolor';\" onClick=\"window.location.href='" . $dirs[$i] . "';\">";
-  echo "\t\t<td width=\"16\"><img src=\"" . IMAGEROOT . "folder.gif\" width=\"16\" height=\"16\" alt=\"Directory\"></td>";
-  echo "\t\t<td><a href=\"" . $dirs[$i] . "\">" . $dirs[$i] . "</a></td>";
-  echo "\t\t<td width=\"50\" align=\"left\">-</td>";
-  echo "\t\t<td width=\"120\" align=\"left\" nowrap>" . date ("M d Y h:i:s A", filemtime($dirs[$i])) . "</td>";
-  echo "\t</tr>";
-}
-
-$arsize = sizeof($files);
-for($i=0;$i<$arsize;$i++) {
-  switch (substr($files[$i], -3)) {
-    case "jpg":
-      $img = "jpg.gif";
-      break;
-    case "gif":
-      $img = "gif.gif";
-      break;
-    case "zip":
-      $img = "zip.gif";
-      break;
-    case "png":
-      $img = "png.gif";
-      break;
-    case "avi":
-      $img = "move.gif";
-      break;
-    case "mpg":
-      $img = "move.gif";
-      break;
-    default:
-      $img = "what.gif";
-      break;
-  }
-
-  echo "\t<tr class=\"row\" onMouseOver=\"this.style.backgroundColor='$highlightcolor'; this.style.cursor='hand';\" onMouseOut=\"this.style.backgroundColor='$normalcolor';\" onClick=\"window.location.href='" . $files[$i] . "';\">\r\n";
-  echo "\t\t<td width=\"16\"><img src=\"" . IMAGEROOT . "$img\" width=\"16\" height=\"16\" alt=\"Directory\"></td>\r\n";
-  echo "\t\t<td><a href=\"" . $files[$i] . "\">" . $files[$i] . "</a></td>\r\n";
-  echo "\t\t<td width=\"50\" align=\"left\">" . round(filesize($files[$i])/1024) . "KB</td>\r\n";
-  echo "\t\t<td width=\"120\" align=\"left\" nowrap>" . date ("M d Y h:i:s A", filemtime($files[$i])) . "</td>\r\n";
-  echo "\t</tr>\r\n";
-}
-echo "</table><div align=\"center\"><a href=\"http://evoluted.net/directorylisting.php\" class=\"copy\">Directory Listing Script</a>. <a href=\"http://evoluted.net/\" class=\"copy\">&copy 2003-2004 Ash Young</a></div>";
-?>
-</body>
-</html>
